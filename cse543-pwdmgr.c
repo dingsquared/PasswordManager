@@ -160,13 +160,13 @@ int main(int argc, char *argv[])
 
     #if 1
     /* strengthen password relative to crack_file (argv[3]) */
-    //err = obtain_strong_password( input_passwd, argv[3], &passwd, &pwdlen );
-    //assert( err >= 0 );
+    err = obtain_strong_password( input_passwd, argv[3], &passwd, &pwdlen );
+    assert( err >= 0 );
 
     /* Upload encrypted and authenticated password into key-value store */
     /* Replace password if existing domain */
-		passwd = input_passwd;
-		pwdlen = strlen(passwd);
+		//passwd = input_passwd;
+		//pwdlen = strlen(passwd);
     printf("+++ Uploading domain-password pair: %s --> %s\n", input_domain, passwd);
     err = upload_password( input_domain, strlen(input_domain), passwd, pwdlen,  enc_key, hmac_key );
     fflush(stdout);
@@ -402,7 +402,11 @@ int obtain_strong_password(char *orig_passwd, char* crack_file, char **passwd,
   int i = 0, ct = 0;
 
   // copy original password to output password buffer
-  *pwdlen = strlen( orig_passwd );
+  //size_t plen = strlen( orig_passwd );
+	//char *pwd = (char *)malloc( plen+1 );
+  //strncpy( *pwd, orig_passwd, plen );
+	//pwd[len] = '\0';
+	*pwdlen = strlen( orig_passwd );
   *passwd = (char *)malloc( *pwdlen+1 );
   strncpy( *passwd, orig_passwd, *pwdlen );
   (*passwd)[*pwdlen] = '\0';
@@ -413,12 +417,56 @@ int obtain_strong_password(char *orig_passwd, char* crack_file, char **passwd,
     /* TASK 3: Strengthen passwords that fail minimum guess threshold */
     /* Goal is to use the minimal number of iterations to produce a
        satisfactory password */
+		double oldGuessNumber = guessNumber;
+    size_t i, j, imax, jmax;
+		char subpasswd[*pwdlen];
+		//double guessNumberMax = get_markov_guess_number( *passwd, (*pwdlen)-1, crack_file);
 
+
+		double guessNumberMax = 0;
+    imax = 0;
+		for(i = 0; i < *pwdlen ; i++){
+			for(j = 0; j < *pwdlen - 1; j++){
+				//printf("i = %d, j = %d\n", i, j);
+				if(j < i)
+				  subpasswd[j] = (*passwd)[j];
+				else
+				  subpasswd[j] = (*passwd)[j+1];
+			}
+			subpasswd[*pwdlen - 1] = '\0';
+			guessNumber = get_markov_guess_number( subpasswd, (*pwdlen)-1, crack_file);
+			if( i == 0 ){
+				guessNumberMax = guessNumber;
+			}
+			else if(guessNumber > guessNumberMax){
+				guessNumberMax = guessNumber;
+				imax = i;
+			}
+		}
+    //printf("imax = %d", imax);
+		size_t numChar = '~' - ' ' + 1;
+		char charset[numChar];
+		for(i = 0; i < numChar; i++){
+			charset[i] = ' ' + i;
+		}
+
+		guessNumberMax = oldGuessNumber;
+		jmax = 0;
+		for(j = 0; j < numChar; j++){
+			(*passwd)[imax] = charset[j];
+			guessNumber = get_markov_guess_number( *passwd, *pwdlen, crack_file );
+			if(guessNumber > guessNumberMax){
+				guessNumberMax = guessNumber;
+				jmax = j;
+			}
+		}
+
+		(*passwd)[imax] = charset[jmax];
     // check password again
     guessNumber = get_markov_guess_number( *passwd, *pwdlen, crack_file );
     ct++;
   }
-
+  printf("%s to %s: Number of changes is : %d\n", orig_passwd, *passwd, ct );
   return 0;
 }
 
