@@ -173,6 +173,7 @@ int main(int argc, char *argv[])
     /* Replace password if existing domain */
     printf("+++ Uploading domain-password pair: %s --> %s\n", input_domain, passwd);
     err = upload_password( input_domain, strlen(input_domain), passwd, pwdlen,  enc_key, hmac_key );
+		free(passwd);
     fflush(stdout);
 		#endif
   }
@@ -225,11 +226,11 @@ int main(int argc, char *argv[])
 
     // "use" password (print) if one is found
     if ( err > 0 ) {
-      printf("\n*** Password retrieval for domain %s success: --> %s\n", input_buf, passwd2 );
-      // free( passwd2 );  // CRASH, but not sure why different than above
+      printf("\n*** Password retrieval for \"%s\" successful: --> %s\n", input_buf, passwd2 );
+      free( passwd2 );  // CRASH, but not sure why different than above
     }
     else
-      printf("\n*** Password retrieval for domain %s failed: %d\n", input_buf, err );
+      printf("\n*** Password retrieval for \"%s\" failed: %d\n", input_buf, err );
 
     fflush(stdout);
   }
@@ -237,17 +238,7 @@ int main(int argc, char *argv[])
   if (argc == 6)
     fclose( fp );
 
-	/*{
-	  err = lookup_password( input_domain, strlen(input_domain), &passwd2, enc_key, hmac_key );
-	  if ( err > 0 ) {
-		  printf("\n*** Lookup password for domain: %s -> %s", input_domain, passwd2 );
-		  // free( passwd2 );  // CRASH, but not sure why different than above
-	  }
-	  else
-		  printf("\nPassword retrieval for domain %s failed: %d", input_domain, err );
 
-	  fflush(stdout);
-  }*/
   /* Debug print of passwords in the clear */
   err = kvs_dump( stdout, enc_key );
 
@@ -302,7 +293,7 @@ int make_key_from_master(char *master, unsigned char **enc_key, unsigned char **
 		else
 		  buf[i] = 'A'+i-len;
 	}
-	printf("buf = %s\n", buf);
+
 
 	//digest the buffer to produce keys
 	digest_message(buf, KEYSIZE, &(*enc_key), &len);
@@ -321,7 +312,7 @@ int make_key_from_master(char *master, unsigned char **enc_key, unsigned char **
 int upload_password( char *domain, size_t dlen, char *passwd, size_t plen,
 		     unsigned char *enc_key, unsigned char *hmac_key )
 {
-  //int i = 0;
+  int i = 0;
   unsigned char *pwdbuf = (unsigned char *)malloc(VALSIZE);
   unsigned char *ciphertext, *plaintext, *tag, *hmac;
   /* A 128 bit IV */
@@ -343,40 +334,46 @@ int upload_password( char *domain, size_t dlen, char *passwd, size_t plen,
 	    handleErrors();
   hmac_message((unsigned char *)domain, dlen, &hmac, &hlen, hmac_key);
   //BIO_dump_fp(stdout, (const char *)hmac, hlen);
-  /* (2) Authenticated Encryption of Password */
 
+	/* (2) Authenticated Encryption of Password */
 	ciphertext = (unsigned char *)malloc(VALSIZE);
 	tag = (unsigned char *)malloc(TAGSIZE);
 	plaintext = (unsigned char *)malloc(VALSIZE);
 
 	// padding
-	size_t i;
-	for (i = 0; i < VALSIZE; i++) {
-		if(i < plen)
-		  pwdbuf[i] = passwd[i];
-		else
+	for (i = 0; i < plen; i++) {
+		  pwdbuf[i] = 'A' + i % 26;
+	}
+
+	pwdbuf[plen] = SEPARATOR_CHAR;
+
+	for (i = plen + 1; i <2 * plen + 1; i++) {
+		  pwdbuf[i] = passwd[i - plen - 1];
+	}
+
+  pwdbuf[2*plen + 1] = '\0';
+
+	for (i = 2 * plen + 2; i <VALSIZE; i++) {
 		  pwdbuf[i] = ('A'+i*plen) % 128;
 	}
-	pwdbuf[plen] = '\0';
 
   encrypt(pwdbuf, VALSIZE, NULL, 0, enc_key, iv, ciphertext, tag);
-	clen = strlen((const char*)ciphertext);
-	printf("clen = %d\n", clen);
 
-#if 1
+	clen = VALSIZE;
+
+#if 0
   /* Do something useful with the ciphertext here */
   /* print ciphertext and tag */
   printf("Ciphertext is:\n");
-  //BIO_dump_fp (stdout, (const char *)ciphertext, clen);
+  BIO_dump_fp (stdout, (const char *)ciphertext, clen);
 
   printf("Tag is:\n");
-  //BIO_dump_fp (stdout, (const char *)tag, TAGSIZE);
+  BIO_dump_fp (stdout, (const char *)tag, TAGSIZE);
 
   /* (opt) decrypt to make sure things are working correctly */
   /* decrypt */
   plen = decrypt(ciphertext, VALSIZE, (unsigned char *) NULL, 0,
 		 tag, enc_key, iv, plaintext);
-	printf("plen = %d\n", plen);
   assert( plen >= 0 );
 
   /* Add a NULL terminator. We are expecting printable text */
@@ -384,15 +381,19 @@ int upload_password( char *domain, size_t dlen, char *passwd, size_t plen,
 
   /* Show the decrypted text */
   // Skip prefix, but will remove prefix
-  printf("Decrypted text is: %s\n", plaintext);
-  //for ( i = 0 ; plaintext[i] != SEPARATOR_CHAR; i++ );
-  //printf("Text: %s\n", plaintext+i+1 );
+  printf("Decrypted text is:\n");
+  for ( i = 0 ; plaintext[i] != SEPARATOR_CHAR; i++ );
+  printf("Text: %s\n", plaintext+i+1 );
 #endif
 
 
   /* (3) Set the hmac (domain) and encrypted (password with tag) in KVS */
   kvs_auth_set( hmac, ciphertext, tag );
   free(pwdbuf);
+	free(ciphertext);
+	free(tag);
+	free(plaintext);
+	OPENSSL_free(hmac);
   return 0;
 }
 
@@ -400,8 +401,8 @@ int upload_password( char *domain, size_t dlen, char *passwd, size_t plen,
 size_t lookup_password( char *domain, size_t dlen, unsigned char **passwd, unsigned char *enc_key,
 		     unsigned char *hmac_key )
 {
-  //int i = 0;
-  unsigned char *ciphertext, *tag, *hmac;
+  int i = 0;
+  unsigned char *ciphertext = NULL, *tag = NULL, *hmac = NULL;
   /* A 128 bit IV */
   unsigned char *iv = (unsigned char *)"0123456789012345";
   int plen, err;
@@ -413,25 +414,37 @@ size_t lookup_password( char *domain, size_t dlen, unsigned char **passwd, unsig
      password from the key-value store and (3) decrypt the password,
      returning the password length in plen */
 
-
   /* (1) Compute the HMAC from the domain for the key value for KVS */
 	if((hmac = (unsigned char *)OPENSSL_malloc(EVP_MD_size(EVP_sha256()))) == NULL)
 	    handleErrors();
   hmac_message((unsigned char *)domain, dlen, &hmac, &hlen, hmac_key);
 
   /* (2) Lookup key in key-value store */
-  ciphertext = (unsigned char *)malloc(VALSIZE);
-  tag = (unsigned char *)malloc(TAGSIZE);
+  //ciphertext = (unsigned char *)malloc(VALSIZE);
+  //tag = (unsigned char *)malloc(TAGSIZE);
+
   err = kvs_auth_get(hmac, &ciphertext, &tag);
   if ( err != 0 ) return -1;  // Not found
 
   /* (3) Decrypt password */
 	unsigned char* plaintext = (unsigned char *)malloc(VALSIZE);
-  decrypt(ciphertext, VALSIZE, NULL, 0, tag, enc_key, iv, plaintext);
-	*passwd = plaintext;
-	plen = strlen((const char *)plaintext);
+  plen = decrypt(ciphertext, VALSIZE, NULL, 0, tag, enc_key, iv, plaintext);
+  assert( plen >= 0);
+
+	for(i = 0; i < VALSIZE; i++){
+		if(plaintext[i] == SEPARATOR_CHAR){
+			plen = i;
+			break;
+		}
+	}
+
+	*passwd = (unsigned char *)malloc(plen + 1);
+	memcpy(*passwd, plaintext + plen + 1, plen);
+	(*passwd)[plen] = '\0';
+
+	free(plaintext);
+	OPENSSL_free(hmac);
   return plen;
-  //return plen;
 }
 
 
@@ -439,22 +452,24 @@ int obtain_strong_password(char *orig_passwd, char* crack_file, char **passwd,
 			   size_t *pwdlen)
 {
   double guessNumber;
-  //int i = 0, ct = 0;
-  int ct = 0;
+  int k = 0, ct = 0;
+
   // copy original password to output password buffer
-  //size_t plen = strlen( orig_passwd );
-	//char *pwd = (char *)malloc( plen+1 );
-  //strncpy( *pwd, orig_passwd, plen );
-	//pwd[len] = '\0';
 	*pwdlen = strlen( orig_passwd );
   *passwd = (char *)malloc( *pwdlen+1 );
   strncpy( *passwd, orig_passwd, *pwdlen );
   (*passwd)[*pwdlen] = '\0';
 
+  //set of all characters allowed
+	size_t numChar = '~' - ' ' + 1;
+	char charset[numChar];
+	for(k = 0; k < numChar; k++){
+		charset[k] = ' ' + k;
+	}
   // check password
   guessNumber = get_markov_guess_number( *passwd, *pwdlen, crack_file );
-  //while ( guessNumber < MIN_GUESS_NUMBER ) {
-	while ( 0 ) {
+  while ( guessNumber < MIN_GUESS_NUMBER ) {
+	//while ( 0 ) {
     /* TASK 3: Strengthen passwords that fail minimum guess threshold */
     /* Goal is to use the minimal number of iterations to produce a
        satisfactory password */
@@ -463,7 +478,8 @@ int obtain_strong_password(char *orig_passwd, char* crack_file, char **passwd,
 		char subpasswd[*pwdlen];
 		//double guessNumberMax = get_markov_guess_number( *passwd, (*pwdlen)-1, crack_file);
 
-
+    //find which char to replace
+		printf("\nFindind which character to replace...\n\n");
 		double guessNumberMax = 0;
     imax = 0;
 		for(i = 0; i < *pwdlen ; i++){
@@ -484,13 +500,9 @@ int obtain_strong_password(char *orig_passwd, char* crack_file, char **passwd,
 				imax = i;
 			}
 		}
-    //printf("imax = %d", imax);
-		size_t numChar = '~' - ' ' + 1;
-		char charset[numChar];
-		for(i = 0; i < numChar; i++){
-			charset[i] = ' ' + i;
-		}
 
+    //find the best replacement char
+    printf("\nFindind the best replacement...\n\n");
 		guessNumberMax = oldGuessNumber;
 		jmax = 0;
 		for(j = 0; j < numChar; j++){
@@ -571,12 +583,11 @@ int kvs_dump(FILE *fptr, unsigned char *enc_key)
 	      /* decrypt */
 	        plaintext = (unsigned char *)malloc(VALSIZE);
 	        plen = decrypt(av->value, VALSIZE, (unsigned char *) NULL, 0,
-			    av->tag, enc_key, iv, plaintext);
-					printf("plen = %d\n", plen);
-	        //assert( plen >= 0 );
+			                   av->tag, enc_key, iv, plaintext);
+	        assert( plen >= 0 );
 
 	  /* Show the decrypted text */
-#if 1
+#if 0
 	        printf("Password: %s\n", plaintext);
 	  //BIO_dump_fp (fptr, (const char *)plaintext, plen);
 	  //BIO_dump_fp (fptr, (const char *)av->tag, TAGSIZE);  // Dump tag

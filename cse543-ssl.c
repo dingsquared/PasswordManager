@@ -78,7 +78,6 @@ int decrypt(unsigned char *ciphertext, int ciphertext_len, unsigned char *aad,
 	    int aad_len, unsigned char *tag, unsigned char *key, unsigned char *iv,
 	    unsigned char *plaintext)
 {
-  fprintf(stderr,"iv = %s\n", iv);
   EVP_CIPHER_CTX *ctx;
   int len;
   int plaintext_len;
