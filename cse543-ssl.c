@@ -11,7 +11,7 @@
 #include "cse543-ssl.h"
 
 
-// OpenSSL example code from: 
+// OpenSSL example code from:
 // https://wiki.openssl.org/index.php/EVP_Authenticated_Encryption_and_Decryption
 
 int encrypt(unsigned char *plaintext, int plaintext_len, unsigned char *aad,
@@ -71,13 +71,14 @@ int encrypt(unsigned char *plaintext, int plaintext_len, unsigned char *aad,
 }
 
 
-// OpenSSL example code from: 
+// OpenSSL example code from:
 // https://wiki.openssl.org/index.php/EVP_Authenticated_Encryption_and_Decryption
 
 int decrypt(unsigned char *ciphertext, int ciphertext_len, unsigned char *aad,
 	    int aad_len, unsigned char *tag, unsigned char *key, unsigned char *iv,
 	    unsigned char *plaintext)
 {
+  fprintf(stderr,"iv = %s\n", iv);
   EVP_CIPHER_CTX *ctx;
   int len;
   int plaintext_len;
@@ -100,7 +101,7 @@ int decrypt(unsigned char *ciphertext, int ciphertext_len, unsigned char *aad,
   /* Provide any AAD data. This can be called zero or more times as
    * required
    */
-  /* 
+  /*
   if(!EVP_DecryptUpdate(ctx, NULL, &len, aad, aad_len))
     handleErrors();
   */
@@ -137,7 +138,7 @@ int decrypt(unsigned char *ciphertext, int ciphertext_len, unsigned char *aad,
     }
 }
 
-// OpenSSL example code from: 
+// OpenSSL example code from:
 // https://wiki.openssl.org/index.php/EVP_Message_Digests
 
 void digest_message(const unsigned char *message, size_t message_len, unsigned char **digest, unsigned int *digest_len)
@@ -164,7 +165,7 @@ void digest_message(const unsigned char *message, size_t message_len, unsigned c
 
 
 
-// OpenSSL example code derived from: 
+// OpenSSL example code derived from:
 // https://stackoverflow.com/questions/12545811/using-hmac-vs-evp-functions-in-openssl
 
 int hmac_message(unsigned char* msg, size_t mlen, unsigned char** val, size_t* vlen, unsigned char *key)
@@ -185,7 +186,7 @@ int hmac_message(unsigned char* msg, size_t mlen, unsigned char** val, size_t* v
 
   if(!HMAC_Final(&ctx, *val, (unsigned int *)vlen))
     handleErrors();
-  
+
   HMAC_CTX_cleanup(&ctx);
 
 #if 0
