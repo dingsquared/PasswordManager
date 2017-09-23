@@ -38,6 +38,9 @@ extern int compute_hmac_key(char *input, size_t len, unsigned char **hmac, size_
 			     unsigned char *hmac_key);
 extern int kvs_dump(FILE *, unsigned char *enc_key);
 
+int parse_domain(FILE *fp, char *domain_buf, int mode);
+
+int parse_passwd(FILE *fp, char *passwd_buf, int mode);
 
 int main(int argc, char *argv[])
 {
@@ -92,77 +95,31 @@ int main(int argc, char *argv[])
     /* TASK 2: Obtain input values for domain-password pairs from user */
 
 		//read domain
-		if(argc == 4){
-			printf("\nInput Domain: ");
-		}
-
-		if (fgets(input_buf, MAX_BUF, fp) == NULL){
-			if(feof(fp))
-				break;
-			else
-				fprintf(stderr, "Error: cannot read input domain, abort!\n");
+		err = parse_domain(fp, input_domain, argc);
+		if(err == 0)
+			break;
+		if(err == -1){
+			if(argc == 4)
+			  continue;
+			else{
+				fprintf(stderr, "\nError in input file %s, abort!\n", argv[4]);
 				abort();
-		}
-
-		len = strlen(input_buf);
-		if( len > MAX_DOMAIN ){
-			fprintf(stderr, "Error: input domain is too long, abort!\n");
-			abort();
-		}
-
-		if( len < 8 ){
-			fprintf(stderr, "Error: invalid domain, abort!\n");
-			abort();
-		}
-
-		if(input_buf[len - 1] == '\n'){
-					input_buf[len - 1] = '\0';
-					len -= 1;
-		}
-
-		if( input_buf[0] != 'w' || input_buf[1] != 'w' || input_buf[2] != 'w'
-				|| input_buf[3] != '.' || input_buf[len-4] != '.' || input_buf[len - 3] != 'c'
-		    ||  input_buf[len - 2] != 'o' || input_buf[len-1] != 'm' ){
-				fprintf(stderr, "Error: invalid domain, abort!\n");
-				abort();
-		}
-
-		memcpy(input_domain, input_buf, len+1);
-		if(argc == 6){ //read from command line
-			printf("\nInput Domain: %s\n", input_domain);
+			}
 		}
 
 		// read password
-		if(argc == 4){
-			printf("Password: ");
-		}
+		err = parse_passwd(fp, input_passwd, argc);
+		if(err == 0)
+			break;
+			if(err == -1){
+				if(argc == 4)
+				  continue;
+				else{
+					fprintf(stderr, "\nError in input file %s, abort!\n", argv[4]);
+					abort();
+				}
+			}
 
-		if (fgets(input_buf, MAX_BUF, fp) == NULL){
-			fprintf(stderr, "Error: cannot read password, abort!\n");
-			abort();
-		}
-
-		len = strlen(input_buf);
-		if( len > MAX_PASSWD ){
-			fprintf(stderr, "Error: password is too long, abort!\n");
-			abort();
-		}
-
-		if( len < 8 ){
-			fprintf(stderr, "Error: password is too short, abort!\n");
-			abort();
-		}
-
-		if(input_buf[len - 1] == '\n'){
-			input_buf[len - 1] = '\0';
-			len -= 1;
-		}
-
-		memcpy(input_passwd, input_buf, len+1);
-
-		if(argc == 6){ //read from command line
-			printf("Password: %s\n", input_passwd);
-		}
 
     #if 1
     /* strengthen password relative to crack_file (argv[3]) */
@@ -342,18 +299,12 @@ int upload_password( char *domain, size_t dlen, char *passwd, size_t plen,
 
 	// padding
 	for (i = 0; i < plen; i++) {
-		  pwdbuf[i] = 'A' + i % 26;
+		  pwdbuf[i] = passwd[i];
 	}
 
-	pwdbuf[plen] = SEPARATOR_CHAR;
+	pwdbuf[plen] = '\0';
 
-	for (i = plen + 1; i <2 * plen + 1; i++) {
-		  pwdbuf[i] = passwd[i - plen - 1];
-	}
-
-  pwdbuf[2*plen + 1] = '\0';
-
-	for (i = 2 * plen + 2; i <VALSIZE; i++) {
+	for (i = plen + 1; i < VALSIZE; i++) {
 		  pwdbuf[i] = ('A'+i*plen) % 128;
 	}
 
@@ -382,8 +333,8 @@ int upload_password( char *domain, size_t dlen, char *passwd, size_t plen,
   /* Show the decrypted text */
   // Skip prefix, but will remove prefix
   printf("Decrypted text is:\n");
-  for ( i = 0 ; plaintext[i] != SEPARATOR_CHAR; i++ );
-  printf("Text: %s\n", plaintext+i+1 );
+  //for ( i = 0 ; plaintext[i] != SEPARATOR_CHAR; i++ );
+  printf("Text: %s\n", plaintext );
 #endif
 
 
@@ -431,15 +382,15 @@ size_t lookup_password( char *domain, size_t dlen, unsigned char **passwd, unsig
   plen = decrypt(ciphertext, VALSIZE, NULL, 0, tag, enc_key, iv, plaintext);
   assert( plen >= 0);
 
-	for(i = 0; i < VALSIZE; i++){
-		if(plaintext[i] == SEPARATOR_CHAR){
-			plen = i;
+	for(; i < VALSIZE; i++){
+		if(plaintext[i] == '\0'){
 			break;
 		}
 	}
+  plen = i;
 
 	*passwd = (unsigned char *)malloc(plen + 1);
-	memcpy(*passwd, plaintext + plen + 1, plen);
+	memcpy(*passwd, plaintext, plen);
 	(*passwd)[plen] = '\0';
 
 	free(plaintext);
@@ -608,4 +559,82 @@ int kvs_dump(FILE *fptr, unsigned char *enc_key)
       }
     }
     return 0;
+}
+
+// return 0 when EOF, return 1 if domain is good, return -1 if domain is invalid
+int parse_domain(FILE *fp, char *domain_buf, int mode)
+{
+
+	if(mode == 4){
+		printf("\nInput Domain: ");
+	}
+
+  char buf[256];
+
+	if ( fgets(buf, 256, fp) == NULL){
+		return 0;
+	}
+
+	int len = strlen(buf);
+
+	if( len > MAX_DOMAIN || len < 8){
+		fprintf(stderr, "Invalid domain! Domain should be of the form www.*.com and less than 60 chars.\n");
+		return -1;
+	}
+
+  //strip the '\n' at the end
+	if(buf[len - 1] == '\n'){
+				buf[len - 1] = '\0';
+				len -= 1;
+	}
+
+	if( buf[0] != 'w' || buf[1] != 'w' || buf[2] != 'w'
+			|| buf[3] != '.' || buf[len-4] != '.' || buf[len - 3] != 'c'
+			||  buf[len - 2] != 'o' || buf[len-1] != 'm' ){
+			fprintf(stderr, "Invalid domain! Domain should be of the form www.*.com and less than 60 chars.\n");
+			return -1;
+	}
+
+	memcpy(domain_buf, buf, len+1);
+	if(mode == 6){ //read from command line
+		printf("\nInput Domain: %s\n", domain_buf);
+	}
+
+	return 1;
+
+}
+
+
+// return 0 when EOF, return 1 if domain is good, return -1 if domain is invalid
+int parse_passwd(FILE *fp, char *passwd_buf, int mode)
+{
+
+	if(mode == 4){
+		printf("\nInput Password: ");
+	}
+
+  char buf[256];
+
+	if ( fgets(buf, 256, fp) == NULL){
+		return 0;
+	}
+
+	int len = strlen(buf);
+
+	if( len > MAX_PASSWD || len < 8){
+		fprintf(stderr, "Invalid password! Password should be between 8 and 30 chars.\n");
+		return -1;
+	}
+
+  //strip the '\n' at the end
+	if(buf[len - 1] == '\n'){
+				buf[len - 1] = '\0';
+				len -= 1;
+	}
+
+	memcpy(passwd_buf, buf, len+1);
+	if(mode == 6){ //read from command line
+		printf("\nInput Password: %s\n", passwd_buf);
+	}
+	return 1;
 }
